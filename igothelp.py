@@ -3,31 +3,61 @@ import hashlib
 import MySQLdb
 import json
 import smtplib
-
+from datetime import datetime
+import urllib
 urls = (
     '/', 'index',
+    '/login','login',
     '/register', 'register',
     '/checkregistration', 'checkregistration',
+    '/verify', 'verify',
     '/updateuserprofile', 'updateuserprofile',
+
     '/subscription', 'subscription',
     '/updatesubsciption', 'updatesubsciption',
     '/deletesubscription', 'deletesubscription',
+
     '/deletecontact', 'deletecontact',
+
+    '/TeleConnectingIncoming,TeleConnectingIncoming',
+    '/TeleConnectComplete,TeleConnectComplete',
     '/CreateAlert', 'CreateAlert',
+    '/emergency', 'emergency',
+    '/test', 'test',
 )
 
 db = web.database(dbn='mysql', user='root', pw='', db='db_igothelp')
 
 
 class index:
+    #def GET(self):
+       # CFObj = Commonfunctions()
+
+       # return CFObj.GetEmrContact(1, "ea8a003b017650c5a58927b60ff32585", 2)
+       # return CFObj.GetEmrContact(1, "ea8a003b017650c5a58927b60ff32585", 2)
     def GET(self):
         CFObj = Commonfunctions()
+        #return CFObj.SendSMS(8147631545,"This is a test")
+        status = {"status": "Info", "message":"This page is intentionally left blank."}
+        return json.dumps(status)
 
-        return CFObj.GetEmrContact(1, "ea8a003b017650c5a58927b60ff32585", 2)
-        return CFObj.GetEmrContact(1, "ea8a003b017650c5a58927b60ff32585", 2)
 
 
+class test:
+    def POST(self):
+        i = web.input()
+        return i.Phone
+    def GET(self):
+        i = web.input(Phone="",Authcode="")
+        return i
+#FOR REUSABLE FUNCTIONS
 class Commonfunctions:
+    def SendSMS(self,To,Msg):
+        URL="http://alerts.sinfini.com/api/web2sms.php?workingkey=663040hvmlrbxmd00792&to="+str(To)+"&sender=GOTHLP&message="+Msg
+        response = urllib.urlopen(URL)
+        #Save in DB
+
+        return response
     def GetIdFromAuth(self, AuthCode):
         k = "user_authcode='" + AuthCode + "'"
         entries = db.select('tbl_userprofile', what='user_id', where=k)
@@ -37,7 +67,23 @@ class Commonfunctions:
         else:
             status = {"status": "Error", "message": "AuthCode is not associated with any User"}
             return json.dumps(status)
+    def GetIdFromPhone(self, Number,Type): #Type= 'USR' for User and 'DOC for Doctor'
+        if Type=="USR":
+            k = "user_phone='" + Number + "'"
+            table="tbl_userprofile"
+            What="user_id"
+        else:
+            k = "doctor_phone='" + Number + "'"
+            table="tbl_doctor"
+            What="doctor_id"
 
+        entries = db.select(table, what=What, where=k)
+        rows = entries.list();
+        if rows:
+            return rows[0][What]
+        else:
+            status = {"status": "Error", "message": "Nothing Found"}
+            return json.dumps(status)
     def CheckAuth(self, AuthCode):
         k = "user_authcode='" + AuthCode + "'"
         entries = db.select('tbl_userprofile', where=k)
@@ -62,7 +108,6 @@ class Commonfunctions:
             return json.dumps(JArray)
         else:
             return 0
-
     def SendMail(self, To, From, Subject, Body):
         try:
             web.config.smtp_server = 'smtp.gmail.com'
@@ -79,9 +124,12 @@ class Commonfunctions:
         else:
             status = {"status": "Sucess", "message": "Mail Sent"}
             return json.dumps(status)
+    def GetEmrContact(self, Opt, Incoming, Type):
+                                                    # Opt will tell the fuction should return number only
+                                                    # or the entire data
+                                                    # Incoming can be both Authcode or Phone Number
+                                                    # Type will determine which one
 
-    def GetEmrContact(self, Opt, Incoming, Type):  # Incoming can be both Authcode or Phone Number\
-        # Type will determine which one
         if Type == 1:
             k = "user_phone='" + Incoming + "'"
             TypeStr = "Phone Number"
@@ -131,24 +179,69 @@ class Commonfunctions:
         else:
             return 0
 
+    def GenerateOTP(self,Phone):
+        now = datetime.now()
+        mm = str(now.month)
+        ss = str(now.second)
+        Set=list(iter(str(Phone)))
+        OTP=int(Set[9])+int(Set[3])
+        OTP+=int(Set[7])+int(Set[9])
+        OTP+=int(Set[1])+int(Set[5])
+        OTP+=int(Set[4])+int(Set[6])
+        d = datetime.now()
+        OTP=str(ss)+str(d.day)+""+str(OTP)+""+str(mm)
+        return OTP
 
 class checkregistration:
     def GET(self):
-        return 1;
+         status = {"status": "Info", "message":"This page is intentionally left blank."}
+         return json.dumps(status)
 
     def POST(self):
-        user_data = web.input(Phone="")
+        ComFnObj = Commonfunctions()
+        user_data = web.input(Phone='')
         k = "user_phone='" + user_data.Phone + "'"
         entries = db.select('tbl_userprofile', what='user_authcode', where=k)
         rows = entries.list();
         if rows:
-            return rows[0]['user_authcode']
+            ComFnObj = Commonfunctions()
+            OTP=ComFnObj.GenerateOTP(user_data.Phone)
+            Message="Please verify your phone number using this OTP "+OTP
+            ComFnObj.SendSMS(user_data.Phone,Message)
+            try:
+                entries = db.insert('tbl_otp', phonenumber=user_data.Phone,otp=OTP)
+                status = {"status": "Success", "message": "OTP Send"}
+                return json.dumps(status)
+            except:
+                status = {"status": "Error", "message": "Error Try Later"}
+                return json.dumps(status)
         else:
-            status = {"status": "Error", "message": "Phone number is not associated with any User"}
+            status = {"status": "Info", "message": "User registration required"}
             return json.dumps(status)
 
+class verify:
+    def POST(self):
+        user_data = web.input()
+        k ="user_phone=phonenumber and phonenumber='"+user_data.Phone+"' and otp='"+user_data.OTP+"'"
+        entries = db.select('tbl_otp,tbl_userprofile', what='user_authcode,user_id', where=k)
+        rows = entries.list();
+        if rows:
+            for row in rows:
+                JArray = "{"
+                JArray += "id:" + str(row['user_id'])
+                JArray += ",Authcode:" + row['user_authcode'] + "}"
+                k="phonenumber='"+user_data.Phone+"' and otp='"+user_data.OTP+"'"
+                db.delete('tbl_otp',where=k)
+            return json.dumps(JArray)
+        else:
+            status = {"status": "Error", "message": "Phone Verification Failed"}
+            return json.dumps(status)
 
 class register:
+    def GET(self):
+         status = {"status": "Info", "message":"This page is intentionally left blank."}
+         return json.dumps(status)
+
     def POST(self):
         ComFnObj = Commonfunctions()
         # user_data = json.loads(json_input)
@@ -188,8 +281,10 @@ class register:
                                     user_gender=user_data.gender, user_bloodgroup=user_data.bloodgroup, \
                                     user_authcode=Authcode \
                     )
-                #PUSH OTP
-                #PUSH AUTHCODE
+                OTP=ComFnObj.GenerateOTP(user_data.Phone)
+                Message="Please verify your phone number using this OTP "+OTP
+                ComFnObj.SendSMS(user_data.Phone,Message)
+                entries = db.insert('tbl_otp', phonenumber=user_data.Phone,otp=OTP)
                 salut = "Mr."
                 if (user_data.gender == "female"):
                     salut = "M/s"
@@ -199,10 +294,40 @@ class register:
                 status = {"status": "Success", "message": "Update Successful"}
             except MySQLdb.IntegrityError, e:
                 status = {"status": "Error", "message": "Phone Number already registered"}
+                return json.dumps(status)
+            except:
+                status = {"status": "Error", "message": "Error Try Later"}
+                return json.dumps(status)
+        else:
             return json.dumps(status)
+class login:
 
+    def GET(self):
+        user_data = web.input()
+        print user_data.Phone
+        status = {"status": "Info", "message":"This page is intentionally left blank.",}
+        return json.dumps(status)
+
+    def POST(self):
+
+        ComFnObj = Commonfunctions()
+        # user_data = json.loads(json_input)
+        user_data = web.input()
+        #return user_data.Phone
+        flag = 0
+        Id1= ComFnObj.GetIdFromPhone(user_data.Phone,"USR")
+        Id2= ComFnObj.GetIdFromAuth(user_data.Authcode)
+        if (Id1!=Id2):
+            return {"status": "Sucess", "message": "Login Sucess","Authcode":user_data.Authcode}
+        else:
+           status = {"status": "Error", "message": "Login Failed"}
+           return json.dumps(status)
 
 class updateuserprofile:
+    def GET(self):
+         status = {"status": "Info", "message":"This page is intentionally left blank."}
+         return json.dumps(status)
+
     def POST(self):
         ComFnObj = Commonfunctions()
         # user_data = json.loads(json_input)
@@ -249,7 +374,6 @@ class updateuserprofile:
                 return json.dumps(status)
             else:
                 return json.dumps(status)
-
 
 class subscription:
     def GET(self):
@@ -305,8 +429,11 @@ class subscription:
         else:
             return json.dumps(status)
 
-
 class updatesubsciption:
+
+    def GET(self):
+         status = {"status": "Info", "message":"This page is intentionally left blank."}
+         return json.dumps(status)
 
     def POST(self):
         user_data = web.input()
@@ -344,8 +471,11 @@ class updatesubsciption:
         else:
             return json.dumps(status)
 
-
 class deletesubscription:
+    def GET(self):
+         status = {"status": "Info", "message":"This page is intentionally left blank."}
+         return json.dumps(status)
+
     def POST(self):
         ComFnObj = Commonfunctions()
         # user_data = json.loads(json_input)
@@ -360,6 +490,49 @@ class deletesubscription:
             status = {"status": "Sucess", "message": "Subscription deleted"}
             return json.dumps(status)
 
+class emergency:
+
+    def GET(self):
+        user_data = web.input()
+        k='emergency_type='+user_data.typeid
+        entries = db.select('tbl_emergency',where=k)
+        rows = entries.list();
+        JArray = "{"
+        if rows:
+            for row in rows:
+                JArray += "{"
+                JArray += "id:" + str(row['emergency_id'])
+                JArray += ",Name:" + row['emergency_name']
+                JArray += ",Type:" + str(row['emergency_type'])
+                JArray += ",Latitude:" + row['emergency_lat']
+                JArray += ",Longitude:" + row['emergency_lon']
+                JArray += ",Phone:" + str(row['emergency_phone'])
+                JArray += ",Address:" + str(row['emergency_address'])
+                JArray += "},"
+            JArray += "}"
+            return json.dumps(JArray)
+    def POST(self):
+         ComFnObj = Commonfunctions()
+         user_data = web.input()
+         try:
+            entries = db.insert('tbl_userprofile',\
+                                    emergency_name=user_data.name, emergency_type=user_data.type, \
+                                    emergency_lat=user_data.lat, emergency_lon=user_data.lon, \
+                                   emergency_phone=user_data.phone, emergency_address=user_data.address, \
+
+                    )
+             #PUSH OTP
+             #PUSH AUTHCODE
+            salut = "Mr."
+            if (user_data.gender == "female"):
+                salut = "M/s"
+
+            ComFnObj.SendMail(user_data.email, "support@igothelp.com", "Registration Complete", "Hello " + \
+                                  salut + " " + user_data.lastname + "\n This is from support<DATA TO BE INSERTED HERE>")
+            status = {"status": "Success", "message": "Update Successful"}
+         except MySQLdb.IntegrityError, e:
+            status = {"status": "Error", "message": "Phone Number already registered"}
+         return json.dumps(status)
 
 class deletecontact:
     def GET(self):
@@ -385,6 +558,28 @@ class TeleConnectingIncoming:
         ComFnObj = Commonfunctions()
         # user_data = json.loads(json_input)
         user_data = web.input()
+        # NEED DATA FROM THE FRONT END TEAM
+
+class TeleConnectComplete:
+    #TeleConnectcomplete API call saves the connected number
+    # of the doctor and update the Used TeleMed Call.
+    def GET(self):
+        user_data = web.input()
+        ComFnObj = Commonfunctions()
+        DoctorId=ComFnObj.GetIdFromPhone(user_data.DocNumber,"DOC")
+        UserId=ComFnObj.GetIdFromPhone(user_data.UserNumber,"USR")
+        try:
+            entries = db.insert('tbl_telmedcall',
+                                    user_id=UserId, \
+                                    doctor_id=DoctorId, \
+                                    call_date=user_data.date, \
+                                    call_time=user_data.time, \
+                                    status=user_data.status)
+        except Exception as e:
+            return e
+        else:
+            status = {"status": "Sucess", "message": "Call data Updates"}
+            return json.dumps(status)
 
 class CreateAlert:
     def GET(self):
@@ -395,18 +590,13 @@ class CreateAlert:
             status = {"status": "Error", "message": "AuthCode Failed"}
             return json.dumps(status)
         else:
-            """
-
-            THIS PART NEED TO WORK ON. NEED TO GET SINGLE NUMBERS
-
-            """
             EmrPhonenumber=ComFnObj.GetEmrContact(1, user_data.AuthCode, 2)
 
         Numbers=json.loads(EmrPhonenumber).split(',')
         Data=""
         for i in range(0,len(Numbers)-1):
             Number=Numbers[i].split(":")
-            Data+=Number[1]+" sent to Knowlarity for calling\n"
+            Data+=Number[1]+" sent to Knowlarity for calling\n" # HERE WILL HAVE THE ACTUAL API CALL TO KNOWLARITY
         return Data
 
 if __name__ == "__main__":
