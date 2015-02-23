@@ -1,0 +1,1023 @@
+import hashlib
+import json
+import smtplib
+from datetime import datetime
+import urllib
+import re
+import linecache
+import sys
+import MySQLdb
+import collections
+import web
+import random
+
+import time
+import dicttoxml
+import xml.etree.ElementTree as ET
+from xml.etree.ElementTree import fromstring, Element
+
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+urls = (
+    '/', 'index',
+    '/login', 'login',
+    '/test', 'test',
+    '/register', 'register',
+    '/checkregistration', 'checkregistration',
+    '/verify', 'verify',
+    '/usersubscribe', 'usersubscribe',
+    '/updateuserprofile', 'updateuserprofile',
+    '/patient', 'patient',
+
+    '/doctor', 'doctor',
+    '/category', 'category',
+    '/cases', 'cases',
+
+    '/subscription', 'subscription',
+    '/updatesubsciption', 'updatesubsciption',
+    '/deletesubscription', 'deletesubscription',
+
+
+    '/knowlaritycall', 'knowlaritycall',
+    '/logthecall', 'logthecall',
+
+)
+# Server
+db = web.database(dbn='mysql', user='root', pw='igothelp2015', db='igothelp2015 ')
+#Local
+db = web.database(dbn='mysql', user='root', pw='igothelp2015', db='igothelp2015V3')
+
+
+
+
+class index:
+    def GET(self):
+        status = {"status": "Info", "message": "This page is intentionally left blank.","statusCode":121}
+        web.header('Access-Control-Allow-Origin', '*')
+        web.header('Access-Control-Allow-Methods', '*')
+        web.header('Access-Control-Allow-Headers', '*')
+        web.header('Content-Type', 'application/json')
+        return  json.dumps(status)
+
+
+class test:
+    def POST(self):
+      return 1
+
+    def GET(self):
+        ComFnObj = Commonfunctions()
+        return json.dumps(ComFnObj.GetCallLogs(27))
+        return 1
+
+
+
+#FOR REUSABLE FUNCTIONS
+class Commonfunctions:
+
+
+    def LogError(self, message, APICall, LineNo):
+        try:
+            now = datetime.now()
+            date = str(now.year)+"-"+str(now.month)+"-"+str(now.day)+" "
+            time = str(now.hour)+":"+str(now.minute)+":"+str(now.second)
+            entries = db.insert('errorLog', time=date+time,API=APICall,\
+                                        lineNumber=LineNo,details=str(message))
+        except:
+            pass
+    def SMSEmailLog(self,To,From,Type,API,Message):
+        #try:
+              db.insert('smsEmailLog',recepient=To,frm=From,details=Type,apiCall=API,message=Message)
+
+        #except:
+        #    self.PrintException("SMSEMailLog")
+    def PrintException(self,API):
+        try:
+            exc_type, exc_obj, tb = sys.exc_info()
+            f = tb.tb_frame
+            lineno = tb.tb_lineno
+            filename = f.f_code.co_filename
+            linecache.checkcache(filename)
+            print exc_obj
+            line = linecache.getline(filename, lineno, f.f_globals)
+            linepart=line.strip()
+            #linePart="".join(linePart)
+            msg=str(exc_obj)+"[" + linepart + "...]"
+            return self.LogError(msg,API,lineno)#
+        except:
+            pass
+
+    def SendSMS(self, To, Msg):
+        URL = "http://alerts.sinfini.com/api/web2sms.php?workingkey=663040hvmlrbxmd00792&to=" + str(
+            To) + "&sender=GOTHLP&message=" + Msg
+        response = urllib.urlopen(URL)
+        return response
+    def SendMail(self, To, From, Subject, Html,Plain):
+        try:
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = Subject
+            msg['From'] = From
+            msg['To'] = To
+            part1 = MIMEText(Plain, 'plain',"utf-8")
+            part2 = MIMEText(Html, 'html')
+            msg.attach(part1)
+            msg.attach(part2)
+            # Send the message via local SMTP server.
+            #mail = smtplib.SMTP('smtp.gmail.com', 587)
+            mail = smtplib.SMTP('smtp.gmail.com', 587)
+            mail.ehlo()
+            mail.starttls()
+            mail.login('abhilash.c@spurtreetech.com', 'Ab4i7@$h')
+            mail.sendmail(From,To, msg.as_string())
+            mail.quit()
+            status = {"status": "Sucess", "message": "Mail Sent","statusCode":200,"MailSent":True}
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(status)
+        except smtplib.SMTPAuthenticationError:
+            self.PrintException("Mail Sent Function")
+            status = {"status": "Error", "message": "Authentication Error","statusCode":500,"MailSent":False}
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(status)
+
+        except Exception as e:
+            self.PrintException("Mail Sent Function")
+            status = {"status": "Error", "message": "Error Try Later","statusCode":str(e)}
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(status)
+
+    def GetIdFromAuth(self, AuthCode):
+        k = "AuthCode='" + AuthCode + "'"
+        entries = db.select('user', what='ID', where=k)
+        rows = entries.list();
+        if rows:
+            return rows[0]['ID']
+        else:
+            return -1
+    def GetIdFromPhone(self, Number, Type):  #Type= 'USR' for User and 'DOC for Doctor'
+        if Type == "USR":
+            table = "user"
+        else:
+            table = "Doctor"
+
+        entries = db.select(table, what='ID', where='Phone='+Number)
+        rows = entries.list();
+        if rows:
+            return rows[0]["ID"]
+        else:
+            return -1
+    def GetUserNumberFromPatientNumber(self,PatientNumber):
+        Query="SELECT `Phone`,`Relationship` FROM `user`,`patientprofile` WHERE \
+        user.ID=`User_ID` and `patientprofile`.ID="+str(PatientNumber)
+        entries = db.query(Query)
+        rows = entries.list();
+        if rows:
+            return rows[0]['Phone']
+        else:
+            return -1
+    def CheckAuth(self, AuthCode):
+        try:
+            JResponse=collections.OrderedDict()
+            print "Authcode Passed",str(AuthCode)
+            k = "AuthCode='" + str(AuthCode) + "'"
+            entries = db.select('user', where=k)
+            rows = entries.list();
+            if rows:
+                for row in rows:
+                    JArray={"ID":str(row['ID']),\
+                         "FirstName":row['FirstName'],\
+                         "LastName":row['LastName'],\
+                         "Phone":row['Phone'],\
+                         "Email":row['Email'],\
+                         "Birthday":row['BirthDate'],\
+                         "Gender":row['Gender'],\
+                         "BloodGroup":row['BloodGroup'],\
+                         "RegistrationDate":row['RegistrationDate'],\
+                         "AuthCode":row['AuthCode']\
+                        }
+                JResponse["SubscriptionData"]=JArray
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=777
+                JResponse["Message"] ="Record retrived successfully"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+            else:
+                JResponse["SubscriptionData"]={}
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=121
+                JResponse["Message"] ="No user exist"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+        except Exception as e:
+            JResponse["Info"]={}
+            JResponse["Success"] =False
+            JResponse["StatusCode"]=600
+            JResponse["Message"] ="Some Error Happened"+str(e)
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(JResponse)
+    def GetSubPlanDetails(self,SubId):
+        try:
+            if SubId==-1:
+                k="1=1"
+            else:
+                k = "ID=" + SubId + ""
+
+            entries = db.select('subscriptionplan', where=k)
+            rows = entries.list();
+            JResponse = collections.OrderedDict()
+            JArray=[]
+            if rows:
+                for row in rows:
+                    JArray2={"ID":str(row['ID']),\
+                         "Title":row['Title'],\
+                         "Minutes":row['Minutes'],\
+                         "Price":row['Price']}
+                    JArray.append(JArray2)
+
+                JResponse["SubscriptionData"]=JArray
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=777
+                JResponse["Message"] ="Record retrived successfully"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+            else:
+                JResponse["SubscriptionData"]={}
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=121
+                JResponse["Message"] ="No Data Found"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+        except Exception as e:
+                JResponse["SubscriptionData"]={}
+                JResponse["Success"] =False
+                JResponse["StatusCode"]=121
+                JResponse["Message"] ="Some error happened:"+str(e)
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+
+    def GenerateOTP(self,Phone,Count=4):
+        m = hashlib.md5()
+        now = datetime.now()
+        mm = str(now.month)
+        ss = str(now.second)
+        rd=random.random()*1000
+        Gen = str(Phone) + mm + ss+str(rd)
+        m.update(Gen)
+        Plain = m.hexdigest()
+        k = re.findall(r'\d+', Plain)
+        return "".join(k)[:Count]
+    def json2xml(self,json_obj, line_padding=""):
+        result_list = list()
+        json_obj_type = type(json_obj)
+        if json_obj_type is list:
+            for sub_elem in json_obj:
+                result_list.append(self.json2xml(sub_elem, line_padding))
+                return "\n".join(result_list)
+        if json_obj_type is dict:
+            for tag_name in json_obj:
+                sub_obj = json_obj[tag_name]
+                result_list.append("%s<%s>" % (line_padding, tag_name))
+                result_list.append(self.json2xml(sub_obj, "\t" + line_padding))
+                result_list.append("%s</%s>" % (line_padding, tag_name))
+            return "\n".join(result_list)
+        return "%s%s" % (line_padding, json_obj)
+
+    def IsNewCase(self,CaseId):
+        entities=db.select("cases",what="ID",where="ID=" + CaseId)
+        rows=entities.list()
+        if rows:
+            return False
+        else:
+            return True
+    def CreateNewCase(self,Title,Status,PatientID,Description,Category):
+        try:
+            t=db.transaction()
+            db.insert("cases",Title=Title,Status=Status,PatientProfile_ID=PatientID,DoctorCategory_ID=Category,Description=Description)
+            entities=db.query('SELECT LAST_INSERT_ID() as RowId') # GETTING THE LAST RECORD ID INSERTED
+            rows=entities.list()
+            CaseId=rows[0]['RowId']
+            return CaseId
+        except:
+            t.rollback()
+        else:
+            t.commit();
+    def CheckforNewConsultation(self,Case_ID,PatientID):
+        JResponse=collections.OrderedDict()
+        try:
+            t = db.transaction()
+
+            #CHECKING IF THERE IS A NEED TO CREATE A NEW CONSULTATION
+
+            entities=db.query("SELECT ID,ROUND(TIMESTAMPDIFF(SECOND, `CallDate`,NOW())/60) as TimeElapsed from consultation \
+            where  Case_ID="+str(Case_ID)+" and ROUND(TIMESTAMPDIFF(SECOND, `CallDate`,NOW())/60)<30 \
+            order by TimeElapsed ASC LIMIT 0,1")
+            rows=entities.list()
+            ConsultationID=0
+            print rows
+            if rows:
+                ConsultationID=rows[0]["ID"]
+                Type="FOLLOW_UP"
+            else:
+                db.insert("consultation",Case_ID=Case_ID)
+                entities=db.query('SELECT LAST_INSERT_ID() as RowId') # GETTING THE LAST RECORD ID INSERTED
+                rows=entities.list()
+                ConsultationID=rows[0]['RowId']
+                Type="CONSULTATION"
+
+
+            # LOGGING THE CALL DETAILS TO CALL LOG
+            CallLogID=self.CreateNewCallLog(ConsultationID,Type)
+
+
+            #FETCHING USER NUMBER
+
+            UserNumber=self.GetUserNumberFromPatientNumber(PatientID)
+
+
+
+            #FETCHING THE DOCTOR NUMBERS FOR CALL
+            entries=db.select("cases",what="Doctor_ID,DoctorCategory_ID", where='ID='+str(Case_ID))
+            rows=entries.list()
+
+            JArray=[]
+            JInfo=[]
+            if rows:
+                if rows[0]["Doctor_ID"]==None: # IF THIS IS THE FIRST CALL TO THE DOCTOR, DOCTOR ID WILL BE 'NULL'
+                    Query="SELECT `ID`, `FirstName`, `LastName`, `Email`, `Phone`, `Gender` FROM `doctor` WHERE `doctorcategory_ID`="+str(rows[0]["DoctorCategory_ID"])+" and `Availability`=1"
+                else:
+                    Query="SELECT `ID`, `FirstName`, `LastName`, `Email`, `Phone`, `Gender` FROM `doctor` WHERE `ID`="+str(rows[0]["Doctor_ID"])+" and `Availability`=1"
+                entries=db.query(Query)
+                rows=entries.list()
+                if rows:
+                    for row in rows:
+                        JArray={
+                                "ID":row["ID"],
+                                "FirstName":row["FirstName"],
+                                "LastName":row["LastName"],
+                                "Phone":row["Phone"],
+                            }
+                        JInfo.append(JArray)
+                    JResponse["DoctorInfo"]=JInfo
+                    JResponse["LogId"]=CallLogID
+                    JResponse["UserInfo"]=UserNumber
+                    JResponse["Success"] =True
+                    JResponse["StatusCode"]=777
+                    JResponse["Message"] ="Record Retrived"
+                else:
+                    JResponse["DoctorInfo"]={}
+                    JResponse["LogId"]=CallLogID
+                    JResponse["UserInfo"]=UserNumber
+                    JResponse["Success"] =True
+                    JResponse["StatusCode"]=121
+                    JResponse["Message"] ="No Record Found"
+
+            else:
+                JResponse["DoctorInfo"]={}
+                JResponse["LogId"]=-1
+                JResponse["UserInfo"]=UserNumber
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=121
+                JResponse["Message"] ="No Case Found"
+        except Exception as e:
+            t.rollback()
+            JResponse["DoctorInfo"]={}
+            JResponse["LogId"]=-1
+            JResponse["UserInfo"]=-1
+            JResponse["Success"] =False
+            JResponse["StatusCode"]=600
+            JResponse["Message"] ="Some Error Happened"+str(e.message)
+            return JResponse
+
+        else:
+            t.commit()
+            return JResponse
+    def CreateNewCallLog(self,ConsultationID,Type):
+        db.insert("callog",Consultation_ID=ConsultationID,Type=Type)
+        entities=db.query('SELECT LAST_INSERT_ID() as RowId') # GETTING THE LAST RECORD ID INSERTED
+        rows=entities.list()
+        CallLogId=rows[0]['RowId']
+        return CallLogId
+
+    def GetDoctorDetails(self,DocID):
+
+        if DocID!=None:
+            Query="SELECT `ID`, `FirstName`, `LastName`, `Qualification`, `WorkingSince`, \
+               `Availability`, `Email`, `Phone`, `Hospital`, `Gender` FROM `doctor` WHERE `ID`="+str(DocID)
+            entries = db.query(Query)
+            rows = entries.list();
+            JArray=[]
+            if rows:
+
+                JArray={"DocId":rows[0]['ID'],\
+                        "FirstName":rows[0]['FirstName'],\
+                        "LastName":rows[0]['LastName'],\
+                        "Qualification":rows[0]['Qualification'],\
+                        "WorkingSince":rows[0]['WorkingSince'],\
+                        "Availability":rows[0]['Availability'],\
+                        "Email":rows[0]['Email'],\
+                        "Phone":rows[0]['Phone'],\
+                        "Hospital":rows[0]['Hospital'],\
+                        "Gender":rows[0]['Gender']}
+            return JArray
+    def GetCategoryFromID(self,CatId):
+
+        entries = db.select("doctorcategory",where="ID="+str(CatId))
+        rows = entries.list();
+        JArray=[]
+        if rows:
+            JArray={"ID":rows[0]['ID'], "Title":rows[0]['Title']}
+        return JArray
+
+    def GetCallLogs(self,ConsultId):
+        entries = db.select("callog",where="Consultation_ID="+str(ConsultId))
+        rows = entries.list();
+        JArray=[]
+        JConsulInfo=[]
+        if rows:
+            for row in rows:
+                JArray={"CallID":row['ID'],
+                        "CallDate":str(row['CallDate']),
+                        "Status":row['Status'],
+                        "URL":row['URL'],
+                        "Type":row['Type']
+                        }
+                JConsulInfo.append(JArray)
+        return JConsulInfo
+
+    def GetConsultationDetails(self,CaseID):
+        entries = db.select("consultation",where="Case_ID="+str(CaseID))
+        rows = entries.list();
+        JArray=[]
+        JConsulInfo=[]
+        if rows:
+            for row in rows:
+                JArray={"ConsultID":row['ID'],
+                        "CallLog":self.GetCallLogs(row['ID'])
+                        }
+                JConsulInfo.append(JArray)
+        return JConsulInfo
+class checkregistration:
+    def GET(self):
+
+        status = {"status": "Info", "message": "This page is intentionally left blank.","statusCode":121,"success":True}
+        web.header('Access-Control-Allow-Origin', '*')
+        web.header('Access-Control-Allow-Methods', '*')
+        web.header('Access-Control-Allow-Headers', '*')
+        web.header('Content-Type', 'application/json')
+        return  json.dumps(status)
+
+
+    def POST(self):
+        ComFnObj = Commonfunctions()
+        data = web.input(Phone='')
+        print data
+        JResponse=collections.OrderedDict()
+        try:
+            k = "Phone='" + data.phone + "'"
+            entries = db.select('user', what='AuthCode', where=k)
+            rows = entries.list();
+            if rows:
+                OTP = ComFnObj.GenerateOTP(data.phone,4)
+                Message = "Please verify your phone number using this OTP " + str(OTP)
+
+                Auth=rows[0]["AuthCode"]
+                ComFnObj.SendSMS(data.phone, Message)
+                db.query("update user set OTP="+str(OTP)+" where Phone='"+data.phone+"'")
+                JResponse["Info"] ={}
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=777
+                JResponse["Message"] ="OTP Send"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+
+            else:
+                JResponse["Info"] ={}
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=121
+                JResponse["Message"] ="Registration Required"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+        except Exception as e:
+            JResponse["Info"] ={}
+            JResponse["Success"] =False
+            JResponse["StatusCode"]=600
+            JResponse["Message"] ="Some error happened:"+str(e)
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(JResponse)
+class verify:
+    def GET(self):
+        status = {"status": "Info", "message": "This page is intentionally left blank.","statusCode":121}
+        web.header('Access-Control-Allow-Origin', '*')
+        web.header('Access-Control-Allow-Methods', '*')
+        web.header('Access-Control-Allow-Headers', '*')
+        web.header('Content-Type', 'application/json')
+        return  json.dumps(status)
+    def POST(self):
+        ComFnObj = Commonfunctions()
+        user_data = web.input()
+        try:
+
+            k = "Phone='"+user_data.phone+"'and OTP=" + user_data.OTP + ""
+            entries = db.select('user', what='AuthCode', where=k)
+            rows = entries.list();
+            JResponse=collections.OrderedDict()
+            if rows:
+                row=rows[0]
+                JResponse["Info"] =row["AuthCode"]
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=777
+                JResponse["Message"] ="Registration Success"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+            else:
+                JResponse["Info"] ={}
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=121
+                JResponse["Message"] ="OTP Verification Failed"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+        except Exception as e:
+            JResponse["Info"] ={}
+            JResponse["Success"] =False
+            JResponse["StatusCode"]=666
+            JResponse["Message"] ="Some Error Happened:"+str(e.message)
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(JResponse)
+class register:
+    def GET(self):
+        ComFnObj = Commonfunctions()
+        status = {"status": "Info", "message": "This page is intentionally left blank.","statusCode":121,"success":True}
+        web.header('Access-Control-Allow-Origin', '*')
+        web.header('Access-Control-Allow-Methods', '*')
+        web.header('Access-Control-Allow-Headers', '*')
+        web.header('Content-Type', 'application/json')
+        return  json.dumps(status)
+
+
+    def POST(self):
+        JResponse=collections.OrderedDict();
+        try:
+            t = db.transaction()
+            ComFnObj = Commonfunctions()
+            # user_data = json.loads(json_input)
+            user_data = web.input()
+            Salt = "$343dddSS"
+            String = user_data.firstname + user_data.phone + Salt
+            m = hashlib.md5()
+            m.update(String)
+            Authcode = m.hexdigest()
+            OTP = ComFnObj.GenerateOTP(user_data.phone,4)
+            print OTP
+            entries = db.insert('user', FirstName=user_data.firstname, \
+                                    LastName=user_data.lastname, Phone=user_data.phone, \
+                                    Email=user_data.email, BirthDate=user_data.dob, \
+                                    Gender=user_data.gender, BloodGroup=user_data.bloodgroup, \
+                                    AuthCode=Authcode,OTP=OTP)
+
+            Message = "Please verify your phone number using this OTP " + OTP
+            ComFnObj.SendSMS(user_data.phone, Message)
+            #render = web.template.render('/var/www/html/Templates')
+            render = web.template.render('Templates')
+            USERNAME=user_data.firstname+" "+user_data.lastname
+            Returner=render.Welcome(USERNAME)
+            MailBody=Returner['__body__']
+            MailBodyPlain="Registration Complete"
+            ComFnObj.SendMail(user_data.email,"support@igothelp.com","Welcome to I Got Helps",MailBody,MailBodyPlain)
+
+        except MySQLdb.IntegrityError, e:
+            t.rollback()
+            JResponse["Info"] ={}
+            JResponse["Success"] =False
+            JResponse["StatusCode"]=600
+            JResponse["Message"] ="Some error happened:"+str(e)
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(JResponse)
+        except Exception as e:
+            t.rollback()
+            JResponse["Info"] ={}
+            JResponse["Success"] =False
+            JResponse["StatusCode"]=600
+            JResponse["Message"] ="Some error happened:"+str(e)
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(JResponse)
+        else:
+            t.commit()
+            JResponse["Info"] ={}
+            JResponse["Success"] =True
+            JResponse["StatusCode"]=777
+            JResponse["Message"] ="OTP Send"
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(JResponse)
+class login:
+    def GET(self):
+        ComFnObj = Commonfunctions()
+        user_data = web.input()
+        print user_data.Phone
+        status = {"status": "Info", "message": "This page is intentionally left blank.","statusCode":121,"success":True}
+        web.header('Access-Control-Allow-Origin', '*')
+        web.header('Access-Control-Allow-Methods', '*')
+        web.header('Access-Control-Allow-Headers', '*')
+        web.header('Content-Type', 'application/json')
+        return  json.dumps(status)
+
+
+    def POST(self):
+        ComFnObj = Commonfunctions()
+        user_data = web.input()
+        header = web.ctx.environ
+        Authcode = header.get('HTTP_AUTHCODE')
+        JResponse=collections.OrderedDict();
+        try:
+            flag = 0
+            Id1 = ComFnObj.GetIdFromPhone(user_data.Phone, "USR")
+            Id2 = ComFnObj.GetIdFromAuth(Authcode)
+            if (Id1 != Id2):
+                JResponse["Info"] ={}
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=777
+                JResponse["Message"] ="Login Successfull"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+            else:
+                JResponse["Info"] ={}
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=121
+                JResponse["Message"] ="Login Failed"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+        except:
+            JResponse["Info"] ={}
+            JResponse["Success"] =False
+            JResponse["StatusCode"]=600
+            JResponse["Message"] ="Some Error happened"
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(JResponse)
+class patient:
+    def POST(self):
+        JResponse=collections.OrderedDict()
+        try:
+
+                t = db.transaction()
+                ComFnObj = Commonfunctions()
+                # user_data = json.loads(json_input)
+                user_data = web.input(Type=1)
+                if user_data.Type==1:
+                    entries = db.insert('patientprofile', FirstName=user_data.firstname, \
+                                        LastName=user_data.lastname,BirthDate=user_data.dob, \
+                                        Gender=user_data.gender, BloodGroup=user_data.bloodgroup, \
+                                       User_ID=user_data.ID,Relationship=user_data.relationship)
+                else:
+                    entries = db.update('patientprofile', FirstName=user_data.firstname, \
+                                        LastName=user_data.lastname,BirthDate=user_data.dob, \
+                                        Gender=user_data.gender, BloodGroup=user_data.bloodgroup\
+                                       ,Relationship=user_data.relationship, where="User_ID='"+str(user_data.ID)+"'")
+        except Exception as e:
+            t.rollback()
+            JResponse["Info"] ={}
+            JResponse["Success"] =False
+            JResponse["StatusCode"]=600
+            JResponse["Message"] ="Some error happened:"+str(e)
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(JResponse)
+        else:
+            Msg=[]
+            Msg[1]="Added Successfully"
+            Msg[2]="Updated Successfully"
+
+            t.commit()
+            JResponse["Info"] ={}
+            JResponse["Success"] =True
+            JResponse["StatusCode"]=777
+            JResponse["Message"] =Msg[user_data.Type]
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(JResponse)
+class doctor:
+    def GET(self):
+        ComFnObj = Commonfunctions()
+        JResponse = collections.OrderedDict()
+        user_data = web.input(availability=0,category=0,docid=0)
+        try:
+            user_data.list
+            QueryTypes = "SELECT COUNT( Availability ) as Counts ,`doctorcategory_ID` ,  `Title` \
+                          FROM  `doctor`\
+                          RIGHT JOIN doctorcategory ON doctor.doctorcategory_ID = doctorcategory.ID\
+                          where Availability=1 GROUP BY doctorcategory.ID"
+            entriesType = db.query(QueryTypes)
+            rowsTypes = entriesType.list();
+            if rowsTypes:
+                JArrayTypes = []
+                for rowType in rowsTypes:
+                    JArrayType ={"ID":rowType['doctorcategory_ID'],"CatagoryName":rowType['Title'],"Available":rowType['Counts']}
+                    JArrayTypes.append(JArrayType)
+
+                JResponse["CategoryTypes"] =JArrayTypes
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=777
+                JResponse["Message"] ="Successfully retrieved data"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+            else:
+                JResponse["CategoryTypes"] ={}
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=121
+                JResponse["Message"] ="No Record Found"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+        except Exception as e:
+            pass
+
+        # THE CALL TO DOCTOR SPECIFICATION
+        if user_data.availability>0:
+            wherepart="Availability=1"
+        else:
+            wherepart=''
+
+        if user_data.category >0 :
+            if(len(wherepart)>0):
+                putand=' and '
+            else:
+                putand=''
+            wherepart+=putand+"doctorcategory_ID="+user_data.category
+        else:
+           pass
+
+        if user_data.docid>0:
+            if(len(wherepart)>0):
+                putand=' and '
+            else:
+                putand=''
+            wherepart+=putand+"ID="+user_data.docid
+        else:
+          pass
+
+        if wherepart=='':
+            JResponse["DoctorList"] ={}
+            JResponse["Success"] =True
+            JResponse["StatusCode"]=121
+            JResponse["Message"] ="Error in API CALL"
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(JResponse)
+        else:
+            try:
+                Query="SELECT doctor.`ID`, `FirstName`, `LastName`, `doctorcategory_ID`as CategoryID," \
+                   "Title as CategoryTitle, `Qualification`, (YEAR(NOW())-`WorkingSince`) as " \
+                  "Experience, `Availability`, " \
+                   "`Email`, `Phone`, `Gender`  FROM `doctor`,`doctorcategory` where "+wherepart+"  and `doctorcategory_ID`=doctorcategory.`ID`"
+                print Query
+                entries=db.query(Query)
+                rows=entries.list();
+                if rows:
+                    InfoBlock=[]
+                    for row in rows:
+
+
+                        if row["Availability"]==0:
+                            Availability=False
+                        else:
+                            Availability=True
+
+                        JArray={"ID":row['ID'],\
+                        "FirstName":row['FirstName'],\
+                        "LastName":row['LastName'],\
+                        "CategoryID":row['CategoryID'],\
+                        "Email":row['Email'],\
+                        "Gender":row['Gender'],\
+                        "CategoryTitle":row['CategoryTitle'],\
+                        "Availability":Availability,\
+                        "Phone":row['Phone'],
+                        "Exprerience":row['Experience']}
+                        InfoBlock.append(JArray)
+                    JResponse["DoctorList"] =InfoBlock
+                    JResponse["Success"] =True
+                    JResponse["StatusCode"]=777
+                    JResponse["Message"] ="Successfully retreived data"
+                    web.header('Access-Control-Allow-Origin', '*')
+                    web.header('Access-Control-Allow-Methods', '*')
+                    web.header('Access-Control-Allow-Headers', '*')
+                    web.header('Content-Type', 'application/json')
+                    return  json.dumps(JResponse)
+                else:
+                    JResponse["DoctorList"] ={}
+                    JResponse["Success"] =True
+                    JResponse["StatusCode"]=121
+                    JResponse["Message"] ="No doctor found"
+                    web.header('Access-Control-Allow-Origin', '*')
+                    web.header('Access-Control-Allow-Methods', '*')
+                    web.header('Access-Control-Allow-Headers', '*')
+                    web.header('Content-Type', 'application/json')
+                    return  json.dumps(JResponse)
+            except Exception as e:
+                    JResponse["DoctorList"] ={}
+                    JResponse["Success"] =False
+                    JResponse["StatusCode"]=666
+                    JResponse["Message"] ="Some Error Happened:"+str(e)
+                    web.header('Access-Control-Allow-Origin', '*')
+                    web.header('Access-Control-Allow-Methods', '*')
+                    web.header('Access-Control-Allow-Headers', '*')
+                    web.header('Content-Type', 'application/json')
+                    return  json.dumps(JResponse)
+class cases:
+    def POST(self):
+        ComFnObj = Commonfunctions()
+        user_data=web.input(Type="ALL")
+        if user_data.Type=="ALL":
+            entries = db.select('cases')
+
+
+
+            JResponse = collections.OrderedDict()
+            JCase=[]
+            JArray=[]
+            rows = entries.list();
+            if rows:
+
+                for row in rows:
+                    JCase={"ID":str(row['ID']),\
+                           "Title":row['Title'],\
+                            "RegisteredDate":str(row['RegisterDate']),\
+                            "Status":row['Status'],\
+                            "DoctorDetails":ComFnObj.GetDoctorDetails(row['Doctor_ID']),\
+                            "Description":row["Description"],
+                            "Category":ComFnObj.GetCategoryFromID(row['DoctorCategory_ID']),
+                            "Consultation":ComFnObj.GetConsultationDetails(row['ID'])
+                        }
+                    JArray.append(JCase)
+
+                JResponse["CaseList"]=JArray
+                JResponse["Success"] =True
+                JResponse["StatusCode"]=777
+                JResponse["Message"] ="Record retrived successfully"
+                web.header('Access-Control-Allow-Origin', '*')
+                web.header('Access-Control-Allow-Methods', '*')
+                web.header('Access-Control-Allow-Headers', '*')
+                web.header('Content-Type', 'application/json')
+                return  json.dumps(JResponse)
+
+
+
+
+
+#CALL TO HIT FOR A CALL INITIATION
+class knowlaritycall:
+    try:
+
+        def POST(self):
+            ComFnObj = Commonfunctions()
+            user_data = web.input(category='',title='',desc='')
+            Category=user_data.category
+            Patient_ID=user_data.ID
+            Case_ID=user_data.caseid
+            if ComFnObj.IsNewCase(Case_ID):
+                Case_ID=ComFnObj.CreateNewCase(user_data.title,"On-Going",Patient_ID,user_data.desc,Category)
+
+
+            JNumberToBeCalled=ComFnObj.CheckforNewConsultation(Case_ID,Patient_ID)
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return json.dumps(JNumberToBeCalled)
+
+
+        ############################################################################################
+        #                                                                                          #
+        #    HERE WILL HIT THE KNOWLARITY API WHERE WE TELL WHOM TO CALL AND WITH WHAT CALLLOGID   #
+        #                                                                                          #
+        ############################################################################################
+
+    except:
+        print "Error"
+#API TO HIT BY KNOWLARITY AFTER A CALL
+class logthecall:
+    def POST(self):
+        JResponse=collections.OrderedDict()
+        try:
+            ComFnObj = Commonfunctions()
+            user_data = web.input(url="",doctorid=None)
+            CallLogID=user_data.logid
+            CallStatus=user_data.status
+            CallDuration=user_data.callduration
+            RecordingURL=user_data.url
+            WhoTalked=user_data.doctorid
+            if WhoTalked==None:
+                WhoTalked="NULL"
+
+        #UPDATE THE CALL LOG
+
+            db.query("UPDATE `callog` SET `CallTime`="+str(CallDuration)+",`Status`='"+CallStatus+"',URL='"+RecordingURL+"' WHERE `ID`="+str(CallLogID))
+
+        #UPDATE THE DOCTOR SPOKEN
+
+            entities=db.query("SELECT `Case_ID` FROM `callog`,consultation WHERE "
+                              "callog.Consultation_ID=consultation.ID and callog.`ID`="+str(CallLogID))
+            rows=entities.list();
+            if rows:
+                CaseID=rows[0]["Case_ID"]
+                db.query("UPDATE `cases` SET `Doctor_ID`="+str(WhoTalked)+" WHERE `ID`="+str(CaseID))
+            else:
+                raise
+        except Exception as e:
+            JResponse["Success"] =False
+            JResponse["StatusCode"]=600
+            JResponse["Message"] ="Some Error Happened:"+str(e)
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(JResponse)
+        else:
+
+            JResponse["Success"] =True
+            JResponse["StatusCode"]=777
+            JResponse["Message"] ="Call Logged Successfully"
+            web.header('Access-Control-Allow-Origin', '*')
+            web.header('Access-Control-Allow-Methods', '*')
+            web.header('Access-Control-Allow-Headers', '*')
+            web.header('Content-Type', 'application/json')
+            return  json.dumps(JResponse)
+
+
+
+
+if __name__ == "__main__":
+    app = web.application(urls, globals())
+    app.run()
+else:
+    application = web.application(urls, globals()).wsgifunc()
